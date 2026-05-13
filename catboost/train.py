@@ -13,7 +13,6 @@ from sklearn.metrics import (
     average_precision_score,
     roc_auc_score,
     precision_recall_curve,
-    f1_score,
 )
 import joblib
 import xgboost as xgb
@@ -22,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from features import engineer_features
 
 SEED = 42
-np.random.seed(SEED)
 
 DATA_DIR = "../data"
 MODEL_DIR = "model"
