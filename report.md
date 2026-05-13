@@ -40,6 +40,8 @@ An extensive search over window configurations revealed that **ultra-short windo
 
 Feature pruning via XGBoost gain-based importance reduces this to **297 features** (~39% of total) while retaining ~100% of the gain. The top features are dominated by rolling standard deviation, confirming that changes in local variance are the primary anomaly signal.
 
+**Reproducibility mechanism.** The 297 selected feature names are stored in `metadata.pkl` alongside the trained model. On subsequent runs, `train.py` loads this feature list from the existing metadata rather than re-running gain-based selection. This guarantees that the same 297 features are used for both training and inference, preventing the mismatch that would occur if feature selection were re-computed (which can yield 250–300 features depending on floating-point variations in gain scores). If no metadata exists (first-time training), a fresh gain-based selection is performed on the full 759 features.
+
 ---
 
 ## 3. XGBoost
