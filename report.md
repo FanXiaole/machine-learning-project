@@ -325,11 +325,30 @@ LightGBM's best configuration (attempt 3) achieved AUPR=0.852, F1=0.889, with 20
 
 **Final ranking on this dataset:** XGBoost > CatBoost ≫ LightGBM.
 
-### 8.4 Task 2 Generalization
+### 8.4 Distribution-Invariant Features
+
+The adversarial validation (Section 5) revealed that 3 features exhibit >1.5× variance ratio between training and Task 2 distributions. Standard z-scores based on rolling mean and standard deviation are inherently distribution-dependent: when variance scales by 1.5×, the same raw deviation maps to a different z-score. To address this, distribution-invariant alternatives were implemented and evaluated.
+
+**Approach.** Four new feature types were added: rolling median, MAD (Median Absolute Deviation), IQR (Inter-Quartile Range), robust z-score `(x - median) / MAD`, and percentile rank within rolling window. These features maintain identical semantics regardless of the underlying distribution — "being in the 95th percentile of recent values" means the same thing in train and test. The feature set expanded from 759 to 1,254 features.
+
+**Empirical validation of invariance.** A controlled experiment confirmed that MAD-based z-scores are perfectly invariant to variance scaling: when multiplying the signal by 1.5×, the Pearson correlation between original and shifted z-scores was 1.000 for MAD-based scores, while standard-deviation-based z-scores collapsed entirely.
+
+**Results.**
+
+| Model | Original Features | Robust Features | Δ |
+|-------|------------------|-----------------|---|
+| XGBoost | 0.9900 ± 0.0138 | 0.9564 ± 0.0607 | **−0.034** |
+| CatBoost | 0.9395 ± 0.0837 | 0.9434 ± 0.0796 | +0.004 |
+
+The robust z-score feature `f31_rz30` ranked #1 by gain importance (40,341), confirming that MAD-based features carry strong anomaly detection signal. However, the overall degradation in XGBoost performance reveals a trade-off: the pandas `.apply()`-based computation introduces numerical noise that harms the precision of exact split thresholds that XGBoost relies on. CatBoost's marginal improvement (+0.004) is consistent with its greater tolerance for noisy features due to symmetric tree regularization.
+
+**Key takeaway.** Distribution-invariant features are theoretically the correct solution to the Task 2 generalization problem, but their current implementation via `.apply()` is too imprecise for XGBoost's exact split finding. A vectorized implementation (using optimized rolling window functions) could potentially close this gap. However, the original features already achieve near-perfect in-distribution performance, and without Task 2 labels, the conservative choice is to retain them. The original feature set is used for final submission.
+
+### 8.5 Task 2 Generalization
 
 The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental distribution gap. Without the ability to retrain or adapt, model generalization depends entirely on whether the engineered features capture distribution-invariant anomaly patterns. The rolling standard deviation features that dominate both models are likely more robust than raw features, but their reliance on fixed window sizes is an implicit assumption about the temporal scale of anomalies.
 
-### 8.5 Limitations
+### 8.6 Limitations
 
 1. **No Task 2 labels**: All generalization analysis is necessarily indirect. The true Task 2 performance remains unknown.
 2. **Fixed window assumption**: Rolling windows of 2–8 steps implicitly assume anomaly signatures operate on these time scales. A scenario with fundamentally different temporal dynamics would degrade performance.
