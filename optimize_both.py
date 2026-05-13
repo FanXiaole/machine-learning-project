@@ -76,6 +76,7 @@ def eval_catboost(X_train, y_train, X_val, y_val, params):
         **params, scale_pos_weight=spw, random_seed=SEED,
         iterations=800, eval_metric="PRAUC", early_stopping_rounds=50,
         use_best_model=True, verbose=False, thread_count=-1,
+        train_dir="catboost/catboost_info",
     )
     model.fit(Pool(X_train, y_train), eval_set=Pool(X_val, y_val), plot=False)
     probs = model.predict_proba(X_val)[:, 1]
@@ -250,7 +251,7 @@ def train_final_and_predict(xgb_params, cb_params, feature_cols):
     print(f"    Best iter: {best_iter_xgb}  |  Threshold: {xgb_thresh:.4f}")
     print(f"    Val AUPR: {average_precision_score(y[val_cut:], xgb_probs):.4f}")
 
-    xgb.model.save_model(xgb_final, "xgboost/model/xgb_model_optimized.json")
+    xgb_final.save_model("xgboost/model/xgb_model_optimized.json")
     joblib.dump({"threshold": float(xgb_thresh), "feature_cols": feature_cols,
                  "best_iteration": best_iter_xgb, "best_params": xgb_params},
                 "xgboost/model/metadata_optimized.pkl")
@@ -263,12 +264,13 @@ def train_final_and_predict(xgb_params, cb_params, feature_cols):
     cb_p.update({"scale_pos_weight": (y_cv_tr==0).sum()/y_cv_tr.sum(), "random_seed": SEED})
     cb_cv = CatBoostClassifier(**cb_p, iterations=800, eval_metric="PRAUC",
                                 early_stopping_rounds=50, use_best_model=True,
-                                verbose=False, thread_count=-1)
+                                verbose=False, thread_count=-1, train_dir="catboost/catboost_info")
     cb_cv.fit(Pool(X_cv_tr, y_cv_tr), eval_set=Pool(X_cv_v, y_cv_v), plot=False)
     best_iter_cb = cb_cv.get_best_iteration()
 
     cb_final = CatBoostClassifier(**{**cb_params, "scale_pos_weight": full_spw, "random_seed": SEED},
-                                   iterations=best_iter_cb, verbose=100, thread_count=-1)
+                                   iterations=best_iter_cb, verbose=100, thread_count=-1,
+                                   train_dir="catboost/catboost_info")
     cb_final.fit(Pool(X_sel.values, y), plot=False)
 
     # CatBoost threshold
