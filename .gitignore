@@ -1,0 +1,12 @@
+# Claude Code internal
+.claude/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# CatBoost training logs
+catboost_info/

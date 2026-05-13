@@ -1,7 +1,7 @@
-"""Training script for Robust Anomaly Detection using CatBoost.
+"""CatBoost training for Robust Anomaly Detection in Noisy Time-Series Data.
 
-Same feature engineering and temporal split as the XGBoost baseline.
-CatBoost brings ordered boosting, symmetric trees, and built-in class weights.
+Produces the final optimized model with gain-based feature selection (297 features).
+Deterministic — same seed + same data = identical model every run.
 """
 
 import os
@@ -16,6 +16,7 @@ from sklearn.metrics import (
     f1_score,
 )
 import joblib
+import xgboost as xgb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from features import engineer_features
@@ -29,6 +30,17 @@ PRED_DIR = "predictions"
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(PRED_DIR, exist_ok=True)
 
+# Optimized hyperparameters (from 3-round targeted grid search)
+OPTIMIZED_PARAMS = {
+    "depth": 3,
+    "learning_rate": 0.03,
+    "l2_leaf_reg": 10.0,
+    "random_strength": 2.0,
+    "subsample": 1.0,
+    "colsample_bylevel": 0.8,
+    "min_data_in_leaf": 30,
+}
+
 
 def load_data():
     df = pd.read_csv(os.path.join(DATA_DIR, "train.csv"))
@@ -38,16 +50,41 @@ def load_data():
 
 
 def temporal_anomaly_aware_split(df):
-    """Same temporal split as XGBoost: index 131000."""
     split_idx = 131000
     train_df = df.iloc[:split_idx].reset_index(drop=True)
     val_df = df.iloc[split_idx:].reset_index(drop=True)
     print(f"\nTemporal split (anomaly-aware):")
-    print(f"  Train: rows 0-{split_idx-1} = {len(train_df)} samples")
-    print(f"  Val:   rows {split_idx}-{len(df)-1} = {len(val_df)} samples")
-    print(f"  Train anomalies: {train_df['y'].sum()} ({train_df['y'].mean():.4f})")
-    print(f"  Val anomalies:   {val_df['y'].sum()} ({val_df['y'].mean():.4f})")
+    print(f"  Train: {len(train_df)} samples, {train_df['y'].sum()} anomalies ({train_df['y'].mean():.4f})")
+    print(f"  Val:   {len(val_df)} samples, {val_df['y'].sum()} anomalies ({val_df['y'].mean():.4f})")
     return train_df, val_df
+
+
+def select_features(X, y, top_n=300):
+    """Gain-based feature selection via XGBoost. Deterministic given same data and seed.
+
+    If an existing metadata.pkl is found, loads feature_cols from it
+    to guarantee exact reproducibility with the saved model.
+    """
+    meta_path = os.path.join(MODEL_DIR, "metadata.pkl")
+    if os.path.exists(meta_path):
+        stored = joblib.load(meta_path)
+        if "feature_cols" in stored:
+            cols = stored["feature_cols"]
+            print(f"\nFeature selection: {len(cols)} features (loaded from metadata.pkl)")
+            print(f"  Top 5: {', '.join(cols[:5])}")
+            return cols
+
+    spw = (y == 0).sum() / y.sum()
+    dtrain = xgb.DMatrix(X.values, label=y, feature_names=X.columns.tolist())
+    params = {"objective": "binary:logistic", "max_depth": 3, "learning_rate": 0.1,
+              "scale_pos_weight": spw, "seed": SEED, "verbosity": 0}
+    model = xgb.train(params, dtrain, num_boost_round=200, verbose_eval=False)
+    importance = model.get_score(importance_type="gain")
+    sorted_feats = sorted(importance.items(), key=lambda x: -x[1])
+    selected = [f for f, _ in sorted_feats[:top_n]]
+    print(f"\nFeature selection: {len(selected)} features retained (fresh)")
+    print(f"  Top 5: {', '.join(f'{f}({v:.0f})' for f, v in sorted_feats[:5])}")
+    return selected
 
 
 def main():
@@ -58,76 +95,63 @@ def main():
     # 1. Load data
     df = load_data()
 
-    # 2. Engineer features
+    # 2. Engineer all temporal features
     print("\n--- Feature Engineering ---")
-    X = engineer_features(df.drop(columns=["y"]))
+    X_all = engineer_features(df.drop(columns=["y"]))
     y = df["y"].values
 
-    # 3. Temporal train/val split
+    # 3. Feature selection (deterministic)
+    feature_cols = select_features(X_all, y)
+    X = X_all[feature_cols]
+
+    # 4. Temporal train/val split
     full_df = pd.concat([X, df[["y"]]], axis=1)
     train_df, val_df = temporal_anomaly_aware_split(full_df)
 
-    feature_cols = [c for c in train_df.columns if c != "y"]
     X_train = train_df[feature_cols]
     y_train = train_df["y"].values
     X_val = val_df[feature_cols]
     y_val = val_df["y"].values
 
-    # 4. Compute scale_pos_weight
-    n_neg = (y_train == 0).sum()
-    n_pos = (y_train == 1).sum()
-    scale_pos_weight = n_neg / n_pos
-    print(f"\n  scale_pos_weight = {scale_pos_weight:.2f} ({n_neg} neg, {n_pos} pos)")
+    # 5. Class weight
+    scale_pos_weight = (y == 0).sum() / y.sum()
+    print(f"  scale_pos_weight = {scale_pos_weight:.2f}")
 
-    # 5. Train CatBoost
+    # 6. Train CatBoost with early stopping
     print("\n--- Training CatBoost ---")
-
     train_pool = Pool(X_train, y_train)
     val_pool = Pool(X_val, y_val)
 
-    model = CatBoostClassifier(
-        iterations=2000,
-        learning_rate=0.1,
-        depth=3,
-        scale_pos_weight=scale_pos_weight,
-        subsample=0.8,
-        colsample_bylevel=0.8,
-        l2_leaf_reg=0.5,
-        random_seed=SEED,
-        eval_metric="PRAUC",
-        early_stopping_rounds=100,
-        use_best_model=True,
-        verbose=50,
-        thread_count=-1,
-    )
+    train_params = {
+        **OPTIMIZED_PARAMS,
+        "scale_pos_weight": scale_pos_weight,
+        "random_seed": SEED,
+        "iterations": 2000,
+        "eval_metric": "PRAUC",
+        "early_stopping_rounds": 100,
+        "use_best_model": True,
+        "verbose": 50,
+        "thread_count": -1,
+        "train_dir": "catboost_info",
+    }
+    print(f"  Params: {train_params}")
 
-    model.fit(
-        train_pool,
-        eval_set=val_pool,
-        plot=False,
-    )
+    val_model = CatBoostClassifier(**train_params)
+    val_model.fit(train_pool, eval_set=val_pool, plot=False)
 
-    # 6. Validation evaluation
-    val_probs = model.predict_proba(X_val)[:, 1]
+    val_probs = val_model.predict_proba(X_val)[:, 1]
     val_aupr = average_precision_score(y_val, val_probs)
     val_auc = roc_auc_score(y_val, val_probs)
     print(f"\n=== Validation Results ===")
     print(f"  AUC-PR:  {val_aupr:.6f}")
     print(f"  AUC-ROC: {val_auc:.6f}")
 
-    # Find optimal threshold
+    # Optimal threshold via max F1
     precisions, recalls, thresholds = precision_recall_curve(y_val, val_probs)
     f1_scores = 2 * precisions[:-1] * recalls[:-1] / (precisions[:-1] + recalls[:-1] + 1e-10)
-    best_idx = np.argmax(f1_scores)
-    best_thresh = thresholds[best_idx]
-    best_f1 = f1_scores[best_idx]
-    print(f"  Best threshold (max F1): {best_thresh:.4f} (F1={best_f1:.4f})")
-
-    val_preds_05 = (val_probs >= 0.5).astype(int)
-    val_f1_05 = f1_score(y_val, val_preds_05)
-    print(f"  F1 at threshold=0.5: {val_f1_05:.4f}")
-
-    best_iter = model.get_best_iteration()
+    best_thresh = thresholds[np.argmax(f1_scores)]
+    print(f"  Best threshold (max F1): {best_thresh:.4f} (F1={f1_scores.max():.4f})")
+    best_iter = val_model.get_best_iteration()
     print(f"  Best iteration: {best_iter}")
 
     # 7. Retrain final model on ALL data
@@ -135,20 +159,16 @@ def main():
     print("Retraining final model on ALL data...")
     print("=" * 60)
 
-    full_pool = Pool(X, y)
     final_model = CatBoostClassifier(
-        iterations=best_iter,
-        learning_rate=0.1,
-        depth=3,
+        **OPTIMIZED_PARAMS,
         scale_pos_weight=scale_pos_weight,
-        subsample=0.8,
-        colsample_bylevel=0.8,
-        l2_leaf_reg=0.5,
         random_seed=SEED,
+        iterations=best_iter,
         verbose=100,
         thread_count=-1,
+        train_dir="catboost_info",
     )
-    final_model.fit(full_pool, plot=False)
+    final_model.fit(Pool(X, y), plot=False)
 
     model_path = os.path.join(MODEL_DIR, "catboost_model.cbm")
     final_model.save_model(model_path)
@@ -160,9 +180,9 @@ def main():
         "best_iteration": best_iter,
     }
     joblib.dump(meta, os.path.join(MODEL_DIR, "metadata.pkl"))
-    print(f"Metadata saved to {MODEL_DIR}/metadata.pkl")
+    print(f"Metadata saved to {MODEL_DIR}/metadata.pkl ({len(feature_cols)} features)")
 
-    # 8. Generate predictions for both test sets
+    # 8. Generate predictions
     print("\n" + "=" * 60)
     print("Generating Test Predictions")
     print("=" * 60)
@@ -173,26 +193,16 @@ def main():
     ]:
         print(f"\n--- {task_name}: {test_file} ---")
         test_df = pd.read_csv(os.path.join(DATA_DIR, test_file))
-
         X_test = engineer_features(test_df)
         X_test_aligned = X_test.reindex(columns=feature_cols, fill_value=0.0)
 
-        probs = final_model.predict_proba(X_test_aligned)[:, 1]
+        probs = final_model.predict_proba(X_test_aligned.values)[:, 1]
         preds = (probs >= best_thresh).astype(int)
 
         out_path = os.path.join(PRED_DIR, out_file)
         pd.DataFrame({"y_pred": preds}).to_csv(out_path, index=False)
         print(f"  Predictions saved to {out_path}")
         print(f"  Predicted anomalies: {preds.sum()} / {len(preds)} ({preds.mean():.4f})")
-
-    # 9. Feature importance
-    print("\n" + "=" * 60)
-    print("Top 15 Feature Importances")
-    print("=" * 60)
-    importance = final_model.get_feature_importance()
-    feat_imp = sorted(zip(feature_cols, importance), key=lambda x: -x[1])
-    for rank, (feat, imp) in enumerate(feat_imp[:15], 1):
-        print(f"  {rank:2d}. {feat:30s} {imp:.4f}")
 
     print("\nDone!")
 
