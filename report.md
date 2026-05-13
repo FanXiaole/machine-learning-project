@@ -250,19 +250,50 @@ Both models detect all 570 training anomalies (perfect recall). The choice betwe
 
 ---
 
-## 7. Discussion
+## 7. Ensemble Feasibility Assessment
 
-### 7.1 Why XGBoost Outperforms CatBoost on This Dataset
+An investigation was conducted into whether combining XGBoost and CatBoost into an ensemble could yield better performance than either solo model.
+
+### 7.1 Prediction Overlap Analysis
+
+| | Task 1 | Task 2 |
+|---|---|---|
+| Probability correlation (Pearson) | 0.994 | 0.974 |
+| Disagreement rate | 0.10% (26/25,647) | 0.62% (215/34,542) |
+| XGB=1, CB=0 cases | 23 | **212** |
+| XGB=0, CB=1 cases | 3 | 3 |
+
+On Task 1, the models agree on 99.90% of predictions. On Task 2, disagreement rises 6× to 0.62%, but almost entirely in one direction: XGBoost flags anomalies that CatBoost dismisses. This is not complementary error — it reflects CatBoost's systematically more conservative behavior under distribution shift.
+
+### 7.2 Why Ensemble Fails Here
+
+Three structural factors prevent meaningful ensembling:
+
+**1. Model homogeneity.** Both models are gradient-boosted trees trained on identical features and data. Their only difference — asymmetric vs. symmetric tree structure — is insufficient to produce independent error patterns. True ensemble benefit requires diverse base learners (e.g., tree-based + neural, or models trained on different feature subsets).
+
+**2. Ensemble degenerates to threshold tuning.** The solo models span 594–809 anomaly predictions on Task 2. Any ensemble strategy (averaging, AND, OR, weighted voting) produces results strictly within this range, equivalent to choosing a point between two already-optimized decision boundaries.
+
+**3. No residual signal for meta-learning.** Both models achieve AUPR = 1.0 on training data (all 570 anomalies detected). A stacking meta-model has no residual error to exploit — it would simply interpolate between two near-identical predictions.
+
+### 7.3 Conclusion
+
+Ensemble provides no benefit. XGBoost solo is the recommended submission. The only scenario where ensemble could help is if the models were intentionally diversified by training them on different feature subsets, but this would reduce each model's individual performance, likely negating any ensemble gain.
+
+---
+
+## 8. Discussion
+
+### 8.1 Why XGBoost Outperforms CatBoost on This Dataset
 
 XGBoost's asymmetric trees are better suited to this feature set. The 297 engineered features contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
 
 CatBoost's ordered boosting, while theoretically appealing, provides marginal benefit when 137K samples are available and the anomaly signal (sharp variance changes) is strong enough to be captured by standard gradient estimation.
 
-### 7.2 Task 2 Generalization
+### 8.2 Task 2 Generalization
 
 The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental distribution gap. Without the ability to retrain or adapt, model generalization depends entirely on whether the engineered features capture distribution-invariant anomaly patterns. The rolling standard deviation features that dominate both models are likely more robust than raw features, but their reliance on fixed window sizes is an implicit assumption about the temporal scale of anomalies.
 
-### 7.3 Limitations
+### 8.3 Limitations
 
 1. **No Task 2 labels**: All generalization analysis is necessarily indirect. The true Task 2 performance remains unknown.
 2. **Fixed window assumption**: Rolling windows of 2–8 steps implicitly assume anomaly signatures operate on these time scales. A scenario with fundamentally different temporal dynamics would degrade performance.
@@ -271,13 +302,13 @@ The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental d
 
 ---
 
-## 8. Division of Work
+## 9. Division of Work
 
 Solo project — all work (data analysis, feature engineering, XGBoost implementation, CatBoost implementation, hyperparameter optimization, adversarial validation, report writing) was completed by the team member alone.
 
 ---
 
-## References
+## 10. References
 
 - Chen, T., & Guestrin, C. (2016). XGBoost: A Scalable Tree Boosting System. *Proceedings of the 22nd ACM SIGKDD*.
 - Prokhorenkova, L., Gusev, G., Vorobev, A., Dorogush, A. V., & Gulin, A. (2018). CatBoost: unbiased boosting with categorical features. *Advances in Neural Information Processing Systems (NeurIPS)*.
