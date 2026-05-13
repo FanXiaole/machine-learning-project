@@ -129,6 +129,40 @@ AUC-PR is the primary validation metric. AUC-ROC is also reported for completene
 
 The 75% reduction in cross-validation variance is the most significant achievement. The baseline CatBoost model was highly unstable across different temporal splits, making it unreliable for deployment. The optimized model achieves consistent performance regardless of where the temporal split falls within the anomaly region.
 
+### 4.6 Final Model & Test Predictions
+
+The final CatBoost model is trained on all 137,192 labeled samples with the optimized parameters. The best iteration count is determined via a 95/5% holdout validation.
+
+| Property | Value |
+|----------|-------|
+| Final n_estimators | 571 |
+| Optimal threshold | 0.3332 |
+| Val AUPR (holdout) | 0.9959 |
+
+**Test Set Predictions:**
+
+| Dataset | Samples | XGBoost (optimized) | CatBoost (optimized) |
+|---------|---------|---------------------|----------------------|
+| Task 1 (simple) | 25,647 | 931 (3.63%) | 911 (3.55%) |
+| Task 2 (complex) | 34,542 | 806 (2.33%) | 597 (1.73%) |
+
+CatBoost predicts fewer anomalies on both test sets, consistent with its more conservative probability estimates (higher optimal threshold of 0.33 vs XGBoost's 0.008). On Task 2, CatBoost is notably more conservative (597 vs 806 anomalies), which may indicate better robustness to distribution shift — the model is less likely to generate false positives when the data distribution changes.
+
+### 4.7 Final XGBoost Optimization Results (for reference)
+
+XGBoost required minimal tuning since the baseline was already strong:
+
+| Parameter | Baseline | Optimized |
+|-----------|----------|-----------|
+| `learning_rate` | 0.1 | **0.15** |
+| `gamma` | 0.5 | **0.1** |
+| `max_depth` | 3 | 3 (unchanged) |
+| CV AUPR | 0.9874±0.0173 | **0.9903±0.0134** |
+| Val AUPR (holdout) | — | 0.9995 |
+| Final threshold | — | 0.0082 |
+
+XGBoost benefits from a higher learning rate and lower gamma (minimum loss reduction for splits), allowing more trees to contribute while maintaining shallow depth.
+
 ## 5. Discussion
 
 ### 5.1 Why CatBoost Required Heavy Regularization
