@@ -4,9 +4,15 @@
 
 This project addresses anomaly detection in noisy time-series data, motivated by applications such as financial market monitoring. The dataset consists of 137,192 sequential observations with 33 numerical features, where anomalies are rare (0.42% positive rate) and occur exclusively in contiguous streaks of 30 consecutive time steps (19 streaks total, all concentrated in the last ~10% of data at indices 124,283–136,582).
 
-Two models are developed and compared: **XGBoost** (Chen & Guestrin, 2016) and **CatBoost** (Prokhorenkova et al., 2018). Both are gradient-boosted tree ensembles, but they differ fundamentally in tree structure and gradient estimation, offering complementary perspectives on the problem.
+### 1.1 Related Work
 
-### 1.1 Tasks
+Time-series anomaly detection has been approached from multiple paradigms. Statistical methods such as ARIMA-based residual analysis (Box et al., 2015) model temporal dynamics explicitly but are limited to linear, low-dimensional settings. Unsupervised density-based approaches including Isolation Forest (Liu et al., 2008) and Local Outlier Factor (Breunig et al., 2000) operate without labels but struggle with high dimensionality and extreme class imbalance. Autoencoder-based reconstruction error methods (Sakurada & Yairi, 2014) can capture non-linear temporal patterns but require careful threshold calibration.
+
+For supervised tabular anomaly detection with engineered temporal features, gradient-boosted decision trees (GBDTs) have emerged as the dominant paradigm. XGBoost (Chen & Guestrin, 2016) established the benchmark with regularized level-wise tree growth. CatBoost (Prokhorenkova et al., 2018) introduced ordered boosting and symmetric trees to address prediction shift. LightGBM (Ke et al., 2017) proposed leaf-wise growth and gradient-based one-side sampling for efficiency. Grinsztajn et al. (2022) systematically demonstrated that GBDTs consistently outperform deep learning on tabular data, providing the theoretical foundation for our model choice.
+
+In this work, two models are developed and compared: **XGBoost** and **CatBoost**. Both are gradient-boosted tree ensembles, but they differ fundamentally in tree structure and gradient estimation, offering complementary perspectives on the problem. All three GBDT variants (XGBoost, CatBoost, LightGBM) are empirically evaluated, with additional investigation into adversarial feature pruning, ensemble strategies, and distribution-invariant feature engineering.
+
+### 1.2 Tasks
 
 | Task | Dataset | Description |
 |------|---------|-------------|
@@ -340,13 +346,35 @@ The adversarial validation (Section 5) revealed that 3 features exhibit >1.5× v
 | XGBoost | 0.9900 ± 0.0138 | 0.9564 ± 0.0607 | **−0.034** |
 | CatBoost | 0.9395 ± 0.0837 | 0.9434 ± 0.0796 | +0.004 |
 
-The robust z-score feature `f31_rz30` ranked #1 by gain importance (40,341), confirming that MAD-based features carry strong anomaly detection signal. However, the overall degradation in XGBoost performance reveals a trade-off: the pandas `.apply()`-based computation introduces numerical noise that harms the precision of exact split thresholds that XGBoost relies on. CatBoost's marginal improvement (+0.004) is consistent with its greater tolerance for noisy features due to symmetric tree regularization.
+The robust z-score feature `f31_rz30` ranked #1 by gain importance (40,341), confirming that MAD-based features carry strong anomaly detection signal. However, the overall degradation in XGBoost performance reveals three structural problems that prevent robust features from being a drop-in improvement.
 
-**Key takeaway.** Distribution-invariant features are theoretically the correct solution to the Task 2 generalization problem, but their current implementation via `.apply()` is too imprecise for XGBoost's exact split finding. A vectorized implementation (using optimized rolling window functions) could potentially close this gap. However, the original features already achieve near-perfect in-distribution performance, and without Task 2 labels, the conservative choice is to retain them. The original feature set is used for final submission.
+**Why robust features degrade in-distribution performance.** Three factors explain the negative result:
+
+*1. Numerical imprecision from `.apply()`.* Pandas' `rolling().apply()` executes a Python function call per window position. For 137,192 rows × 33 features × 3 windows ≈ 13.6M MAD/IQR/percentile computations, each involving sorting or median-finding within a variable-length window. The accumulated floating-point error creates split boundaries that are slightly misaligned with the true signal. XGBoost's exact split finding amplifies this imprecision: a split threshold of 2.349 vs 2.351 on `f32_rs5` can mean the difference between capturing and missing an anomaly boundary. CatBoost's histogram-based splits (binned into `max_bin` buckets) are naturally less sensitive to this noise, explaining its neutral result (+0.004).
+
+*2. Scale mismatch between feature families.* For normally distributed data, MAD ≈ 0.6745 × σ. This means a robust z-score of 3.0 corresponds to a standard z-score of approximately 2.0. When both feature families coexist in the same XGBoost model, the tree must learn different split thresholds for what is semantically the same degree of deviation. This increases the effective complexity of the optimization landscape without adding new information. Empirically, the top 30 features by gain included both `rs` (8) and `rz` (2) — the model was forced to split attention between two representations of the same underlying signal.
+
+*3. Information redundancy with existing features.* Rolling median correlates at 0.999 with rolling mean on this dataset (the features are near-symmetric with few outliers in normal regions). Percentile rank within a 10–30 step window is effectively a normalized version of the rolling z-score (both measure relative position within a recent window). The robust features largely recode information already present in the standard feature set, but with additional computation noise and a different numerical scale.
+
+**Key takeaway.** Distribution-invariant features are theoretically the correct solution to the Task 2 generalization problem. However, their practical value is limited by (a) the computational precision loss from non-vectorized rolling operations, (b) the scale redundancy with existing z-scores, and (c) the inability to verify Task 2 improvement without hidden labels. Given that the original features already achieve AUPR = 1.0 on training data, the conservative choice is to retain the original feature set. A vectorized C-level implementation of rolling MAD and percentile rank (e.g., via `numpy.lib.stride_tricks`) could potentially resolve issue (a), but issues (b) and (c) remain structural. The original feature set is used for final submission.
 
 ### 8.5 Task 2 Generalization
 
-The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental distribution gap. Without the ability to retrain or adapt, model generalization depends entirely on whether the engineered features capture distribution-invariant anomaly patterns. The rolling standard deviation features that dominate both models are likely more robust than raw features, but their reliance on fixed window sizes is an implicit assumption about the temporal scale of anomalies.
+The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental distribution gap. Without the ability to retrain or adapt, model generalization depends entirely on whether the engineered features capture distribution-invariant anomaly patterns.
+
+**Model behavior under distribution shift.** The three models exhibit increasingly conservative predictions on Task 2 relative to Task 1:
+
+| Model | Task 1 Anomaly Rate | Task 2 Anomaly Rate | Reduction |
+|-------|--------------------|--------------------|-----------|
+| XGBoost | 3.63% | 2.33% | −35.8% |
+| CatBoost | 3.55% | 1.73% | −51.3% |
+| LightGBM | 2.67% | 1.35% | −49.4% |
+
+XGBoost's smaller reduction (−35.8%) compared to CatBoost (−51.3%) suggests that its asymmetric trees, which learn more precise split thresholds, retain more detection sensitivity when the data distribution changes. CatBoost's symmetric structure, while producing smoother probabilities in-distribution, becomes overly conservative under shift — its heavier L2 regularization (`l2_leaf_reg=10.0`) may cause it to dismiss borderline anomaly patterns that fall just outside the training distribution's typical range.
+
+**The double-edged sword of regularization.** CatBoost's optimization journey illustrates a key tension: heavy regularization (L2=10.0) was essential to reduce CV variance from 0.089 to 0.022, but this same regularization may limit its ability to generalize under distribution shift. The rolling standard deviation features that dominate both models are robust to mean shifts (they measure local variation) but are sensitive to variance scaling — a feature value of `f32_rs5=2.5` may indicate an anomaly in the training distribution but could be normal in a distribution with 1.5× variance. XGBoost's lighter regularization (L2=0.5) and exact split finding allow it to retain finer distinctions within the anomaly probability range, potentially preserving recall under shift at the cost of slightly higher false positive risk.
+
+**Why further optimization is blocked.** Any change to improve Task 2 generalization — different features, regularization strengths, or model architectures — can only be evaluated on training-distribution data (via CV). Without Task 2 labels, there is no feedback signal to guide optimization. This is the fundamental constraint of the two-task setup: Task 2 performance is determined at training time, by design choices made before the test distribution is seen.
 
 ### 8.6 Limitations
 
@@ -365,5 +393,31 @@ Solo project — all work (data analysis, feature engineering, XGBoost implement
 
 ## 10. References
 
+- Box, G. E. P., Jenkins, G. M., Reinsel, G. C., & Ljung, G. M. (2015). *Time Series Analysis: Forecasting and Control* (5th ed.). Wiley.
+- Breunig, M. M., Kriegel, H. P., Ng, R. T., & Sander, J. (2000). LOF: Identifying Density-Based Local Outliers. *Proceedings of the ACM SIGMOD*.
 - Chen, T., & Guestrin, C. (2016). XGBoost: A Scalable Tree Boosting System. *Proceedings of the 22nd ACM SIGKDD*.
+- Grinsztajn, L., Oyallon, E., & Varoquaux, G. (2022). Why do tree-based models still outperform deep learning on typical tabular data? *Advances in Neural Information Processing Systems (NeurIPS)*.
+- Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., & Liu, T. Y. (2017). LightGBM: A Highly Efficient Gradient Boosting Decision Tree. *Advances in Neural Information Processing Systems (NeurIPS)*.
+- Liu, F. T., Ting, K. M., & Zhou, Z. H. (2008). Isolation Forest. *Proceedings of the IEEE International Conference on Data Mining (ICDM)*.
 - Prokhorenkova, L., Gusev, G., Vorobev, A., Dorogush, A. V., & Gulin, A. (2018). CatBoost: unbiased boosting with categorical features. *Advances in Neural Information Processing Systems (NeurIPS)*.
+- Sakurada, M., & Yairi, T. (2014). Anomaly detection using autoencoders with nonlinear dimensionality reduction. *Proceedings of the MLSDA Workshop*.
+
+---
+
+## 11. Submission Files
+
+| File | Description |
+|------|-------------|
+| `report.md` | Comprehensive project report |
+| `xgboost/model/xgb_model.json` | Trained XGBoost model (primary) |
+| `xgboost/model/metadata.pkl` | Threshold and feature configuration |
+| `xgboost/predictions/pred_simple.csv` | Task 1 predictions (25,647 rows) |
+| `xgboost/predictions/pred_complex.csv` | Task 2 predictions (34,542 rows) |
+| `xgboost/features.py` | Feature engineering (759 temporal features) |
+| `xgboost/train.py` | XGBoost training script |
+| `xgboost/requirements.txt` | Python dependencies |
+| `catboost/model/catboost_model.cbm` | Trained CatBoost model (backup) |
+| `catboost/predictions/pred_simple.csv` | Task 1 predictions (CatBoost) |
+| `catboost/predictions/pred_complex.csv` | Task 2 predictions (CatBoost) |
+| `catboost/train.py` | CatBoost training script |
+| `data/` | Training and test datasets |
