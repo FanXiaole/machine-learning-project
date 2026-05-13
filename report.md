@@ -175,7 +175,7 @@ A robustness score is defined as:
 robustness_score = anomaly_norm − 0.5 × (adversary_norm / anomaly_norm)
 ```
 
-Features are ranked by this score and the top 250 (out of 253 gain-positive features) are retained.
+Features are ranked by this score and the top 250 (out of 253 gain-positive features from the adversarial experiment's specific XGBoost configuration) are retained. Note that the final production model uses 297 gain-selected features (Section 2); the 253 here reflects the smaller feature set used during this specific experimental run, which depended on parameters such as the number of boosting rounds and the random seed.
 
 ### 5.4 Results
 
@@ -295,7 +295,7 @@ Ensemble provides no benefit. XGBoost solo is the recommended submission. The on
 
 ### 8.1 Why XGBoost Outperforms CatBoost on This Dataset
 
-XGBoost's asymmetric trees are better suited to this feature set. The 297 engineered features contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
+XGBoost's asymmetric trees are better suited to this feature set. The 297 selected features (from 759 engineered) contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
 
 CatBoost's ordered boosting, while theoretically appealing, provides marginal benefit when 137K samples are available and the anomaly signal (sharp variance changes) is strong enough to be captured by standard gradient estimation.
 
@@ -329,7 +329,7 @@ LightGBM's best configuration (attempt 3) achieved AUPR=0.852, F1=0.889, with 20
 
 **Why LightGBM underperforms.** Leaf-wise growth selects the leaf with the highest loss reduction at each step. With a 239:1 class imbalance, the majority class dominates this selection — negative samples are far more numerous, so the largest gradient contributions come from normal observations. Even with `is_unbalance=True`, the histogram-based split finding (which bins feature values into `max_bin` buckets) loses precision on the rare anomaly boundaries that our short-window rolling features are designed to capture. The anomaly signal (sharp variance changes lasting 30 steps) requires precise split thresholds that histogram binning approximates away.
 
-**Key takeaway.** LightGBM's failure is not a weakness of the model per se — it is state-of-the-art for many tabular tasks — but a demonstration that on extreme class imbalance with precision-dependent features, XGBoost's exact split finding and level-wise growth provide a decisive advantage. This validates the earlier theoretical analysis (Section 8.2) with empirical evidence.
+**Key takeaway.** LightGBM's failure is not a weakness of the model per se — it is state-of-the-art for many tabular tasks — but a demonstration that on extreme class imbalance with precision-dependent features, XGBoost's exact split finding and level-wise growth provide a decisive advantage. This validates the earlier theoretical analysis (Section 8.2) with empirical evidence. The LightGBM implementation is documented here for completeness but excluded from the final submission code since it is not the primary model.
 
 **Final ranking on this dataset:** XGBoost > CatBoost ≫ LightGBM.
 
@@ -418,8 +418,13 @@ Solo project — all work (data analysis, feature engineering, XGBoost implement
 | `xgboost/features.py` | Feature engineering (759 temporal features) |
 | `xgboost/train.py` | XGBoost training script |
 | `xgboost/requirements.txt` | Python dependencies |
+| `xgboost/report.md` | XGBoost model report |
 | `catboost/model/catboost_model.cbm` | Trained CatBoost model (backup) |
+| `catboost/model/metadata.pkl` | CatBoost threshold and feature configuration |
 | `catboost/predictions/pred_simple.csv` | Task 1 predictions (CatBoost) |
 | `catboost/predictions/pred_complex.csv` | Task 2 predictions (CatBoost) |
+| `catboost/features.py` | Feature engineering (shared) |
 | `catboost/train.py` | CatBoost training script |
+| `catboost/requirements.txt` | Python dependencies |
+| `catboost/report.md` | CatBoost model report |
 | `data/` | Training and test datasets |
