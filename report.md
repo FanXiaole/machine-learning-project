@@ -418,7 +418,6 @@ Solo project — all work (data analysis, feature engineering, XGBoost implement
 | `xgboost/features.py` | Feature engineering (759 temporal features) |
 | `xgboost/train.py` | XGBoost training script |
 | `xgboost/requirements.txt` | Python dependencies |
-| `xgboost/report.md` | XGBoost model report |
 | `catboost/model/catboost_model.cbm` | Trained CatBoost model (backup) |
 | `catboost/model/metadata.pkl` | CatBoost threshold and feature configuration |
 | `catboost/predictions/pred_simple.csv` | Task 1 predictions (CatBoost) |
@@ -426,5 +425,4 @@ Solo project — all work (data analysis, feature engineering, XGBoost implement
 | `catboost/features.py` | Feature engineering (shared) |
 | `catboost/train.py` | CatBoost training script |
 | `catboost/requirements.txt` | Python dependencies |
-| `catboost/report.md` | CatBoost model report |
 | `data/` | Training and test datasets |
