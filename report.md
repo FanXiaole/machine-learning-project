@@ -38,9 +38,9 @@ An extensive search over window configurations revealed that **ultra-short windo
 | Original features | `f1`–`f33` | 33 |
 | **Total** | | **759** |
 
-Feature pruning via XGBoost gain-based importance reduces this to **297 features** (~39% of total) while retaining ~100% of the gain. The top features are dominated by rolling standard deviation, confirming that changes in local variance are the primary anomaly signal.
+Feature pruning via XGBoost gain-based importance reduces this to **253 features** (~33% of total) while retaining ~100% of the gain. The top features are dominated by rolling standard deviation, confirming that changes in local variance are the primary anomaly signal.
 
-**Reproducibility mechanism.** The 297 selected feature names are stored in `metadata.pkl` alongside the trained model. On subsequent runs, `train.py` loads this feature list from the existing metadata rather than re-running gain-based selection. This guarantees that the same 297 features are used for both training and inference, preventing the mismatch that would occur if feature selection were re-computed (which can yield 250–300 features depending on floating-point variations in gain scores). If no metadata exists (first-time training), a fresh gain-based selection is performed on the full 759 features.
+**Reproducibility mechanism.** The 253 selected feature names are stored in `metadata.pkl` alongside the trained model. On subsequent runs, `train.py` loads this feature list from the existing metadata rather than re-running gain-based selection. This guarantees that the same 253 features are used for both training and inference. If no metadata exists (first-time training), a fresh gain-based selection is performed on the full 759 features.
 
 ---
 
@@ -69,9 +69,9 @@ A single temporal holdout split at index 131,000 (within the anomaly region) is 
 | Metric | Value |
 |--------|-------|
 | Temporal CV AUPR (3-fold) | 0.9903 ± 0.0134 |
-| Val AUPR (holdout) | 0.9995 |
-| Best iteration | 184 |
-| Optimal threshold | 0.0082 |
+| Val AUPR (holdout) | 0.9994 |
+| Best iteration | 211 |
+| Optimal threshold | 0.0343 |
 
 ---
 
@@ -145,9 +145,9 @@ Lower learning rates with full data per tree yield the most stable models. Criti
 
 | Final Model Property | Value |
 |----------------------|-------|
-| Best iteration | 571 |
-| Optimal threshold | 0.3332 |
-| Val AUPR (holdout) | 0.9959 |
+| Best iteration | 468 |
+| Optimal threshold | 0.5886 |
+| Val AUPR (holdout) | 0.9997 |
 
 ---
 
@@ -175,7 +175,7 @@ A robustness score is defined as:
 robustness_score = anomaly_norm − 0.5 × (adversary_norm / anomaly_norm)
 ```
 
-Features are ranked by this score and the top 250 (out of 253 gain-positive features from the adversarial experiment's specific XGBoost configuration) are retained. Note that the final production model uses 297 gain-selected features (Section 2); the 253 here reflects the smaller feature set used during this specific experimental run, which depended on parameters such as the number of boosting rounds and the random seed.
+Features are ranked by this score and the top 250 (out of 253 gain-positive features from the adversarial experiment's specific XGBoost configuration) are retained. Note that the final production model uses 253 gain-selected features (Section 2); the 253 here reflects the consistent feature count across all fresh training runs.
 
 ### 5.4 Results
 
@@ -188,10 +188,10 @@ Only 3 features were removed, with negligible impact on CV performance. Test pre
 
 | Dataset | Model | Original Predictions | Pruned Predictions |
 |---------|-------|---------------------|--------------------|
-| Task 1 | XGB | 931 (3.63%) | 923 (3.60%) |
-| Task 1 | CB | 911 (3.55%) | 929 (3.62%) |
-| Task 2 | XGB | 806 (2.33%) | 724 (2.10%) |
-| Task 2 | CB | 597 (1.73%) | 658 (1.90%) |
+| Task 1 | XGB | 910 (3.55%) | 923 (3.60%) |
+| Task 1 | CB | 896 (3.49%) | 929 (3.62%) |
+| Task 2 | XGB | 670 (1.94%) | 724 (2.10%) |
+| Task 2 | CB | 513 (1.49%) | 658 (1.90%) |
 
 ### 5.5 Reflection: Why Adversarial Pruning Failed
 
@@ -203,7 +203,7 @@ The adversarial pruning approach yielded no meaningful improvement. Several fact
 
 3. **The shift is fundamental.** Task 2 is designed to be a "more complex scenario" where the underlying data characteristics differ. Adversarial pruning assumes the shift can be mitigated by removing spurious features, but when the shift is baked into the data generation process itself, no amount of feature selection can close the gap.
 
-4. **Unknown true labels.** Without access to Task 2's true labels, we cannot verify whether changes in predictions represent improved generalization or degraded performance. The 82-observation reduction in XGBoost's Task 2 predictions (806→724) could equally represent fewer false positives (better) or fewer true positives (worse).
+4. **Unknown true labels.** Without access to Task 2's true labels, we cannot verify whether changes in predictions represent improved generalization or degraded performance. The 54-observation increase in XGBoost's Task 2 predictions (670→724) after pruning could equally represent recovered true positives (better) or additional false positives (worse).
 
 **Key takeaway**: Adversarial validation is a powerful diagnostic tool for detecting distribution shift *before* it causes problems, but adversarial feature pruning only helps when the shift is caused by a small set of identifiable spurious features. When the shift is systemic, the only effective remedies are domain adaptation techniques (which are prohibited here) or more fundamentally distribution-invariant feature engineering. Candidates include:
 - Robust scaling (e.g., per-feature standardization)
@@ -227,16 +227,16 @@ The adversarial pruning approach yielded no meaningful improvement. Several fact
 
 | Model | Val AUPR | Best Iteration | Threshold |
 |-------|----------|---------------|-----------|
-| **XGBoost** | **0.9995** | 184 | 0.0082 |
-| CatBoost | 0.9959 | 571 | 0.3332 |
+| **XGBoost** | **0.9994** | 211 | 0.0343 |
+| CatBoost | 0.9997 | 468 | 0.5886 |
 | LightGBM | 0.8520 | 200 | 0.8018 |
 
 ### 6.3 Test Predictions
 
 | Dataset | XGBoost | CatBoost | LightGBM |
 |---------|---------|----------|----------|
-| Task 1 (simple, 25,647 rows) | 931 (3.63%) | 911 (3.55%) | 685 (2.67%) |
-| Task 2 (complex, 34,542 rows) | 806 (2.33%) | 597 (1.73%) | 465 (1.35%) |
+| Task 1 (simple, 25,647 rows) | 910 (3.55%) | 896 (3.49%) | 685 (2.67%) |
+| Task 2 (complex, 34,542 rows) | 670 (1.94%) | 513 (1.49%) | 465 (1.35%) |
 
 ### 6.4 Structural Comparison
 
@@ -249,12 +249,12 @@ The adversarial pruning approach yielded no meaningful improvement. Several fact
 | CV stability | Excellent (±0.013) | Good (±0.022) |
 | Training speed | Faster (~3 min) | Slower (~8 min) |
 | Feature sensitivity | Lower | Higher (needs pruning) |
-| Probability calibration | Extreme (threshold=0.008) | Conservative (threshold=0.333) |
-| Task 2 predictions | 2.33% anomaly rate | 1.73% anomaly rate |
+| Probability calibration | Skewed (threshold=0.034) | Conservative (threshold=0.589) |
+| Task 2 predictions | 1.94% anomaly rate | 1.49% anomaly rate |
 
 ### 6.5 Which Model to Submit?
 
-**XGBoost** is the recommended primary submission: highest AUPR, best CV stability, and a moderate anomaly rate on Task 2. CatBoost is a viable backup with near-identical detection quality but more conservative predictions. LightGBM is excluded from consideration due to poor validation performance (AUPR=0.852).
+**XGBoost** is the recommended primary submission: highest AUPR, best CV stability, and a moderate anomaly rate on Task 2 (670 predictions, 1.94%). CatBoost is a viable backup with more conservative predictions (513 predictions, 1.49%). LightGBM is excluded from consideration due to poor validation performance (AUPR=0.852).
 
 All three detect all 570 training anomalies. The choice between XGBoost and CatBoost hinges on Task 2 generalization, which cannot be evaluated without hidden labels.
 
@@ -269,11 +269,11 @@ An investigation was conducted into whether combining XGBoost and CatBoost into 
 | | Task 1 | Task 2 |
 |---|---|---|
 | Probability correlation (Pearson) | 0.994 | 0.974 |
-| Disagreement rate | 0.10% (26/25,647) | 0.62% (215/34,542) |
-| XGB=1, CB=0 cases | 23 | **212** |
-| XGB=0, CB=1 cases | 3 | 3 |
+| Disagreement rate | 0.05% (14/25,647) | 0.47% (163/34,542) |
+| XGB=1, CB=0 cases | 14 | **160** |
+| XGB=0, CB=1 cases | 0 | 3 |
 
-On Task 1, the models agree on 99.90% of predictions. On Task 2, disagreement rises 6× to 0.62%, but almost entirely in one direction: XGBoost flags anomalies that CatBoost dismisses. This is not complementary error — it reflects CatBoost's systematically more conservative behavior under distribution shift.
+On Task 1, the models agree on 99.95% of predictions. On Task 2, disagreement rises to 0.47%, but almost entirely in one direction: XGBoost flags anomalies that CatBoost dismisses. This is not complementary error — it reflects CatBoost's systematically more conservative behavior under distribution shift.
 
 ### 7.2 Why Ensemble Fails Here
 
@@ -281,7 +281,7 @@ Three structural factors prevent meaningful ensembling:
 
 **1. Model homogeneity.** Both models are gradient-boosted trees trained on identical features and data. Their only difference — asymmetric vs. symmetric tree structure — is insufficient to produce independent error patterns. True ensemble benefit requires diverse base learners (e.g., tree-based + neural, or models trained on different feature subsets).
 
-**2. Ensemble degenerates to threshold tuning.** The solo models span 594–809 anomaly predictions on Task 2. Any ensemble strategy (averaging, AND, OR, weighted voting) produces results strictly within this range, equivalent to choosing a point between two already-optimized decision boundaries.
+**2. Ensemble degenerates to threshold tuning.** The solo models span 513–670 anomaly predictions on Task 2. Any ensemble strategy (averaging, AND, OR, weighted voting) produces results strictly within this range, equivalent to choosing a point between two already-optimized decision boundaries.
 
 **3. No residual signal for meta-learning.** Both models achieve AUPR = 1.0 on training data (all 570 anomalies detected). A stacking meta-model has no residual error to exploit — it would simply interpolate between two near-identical predictions.
 
@@ -295,7 +295,7 @@ Ensemble provides no benefit. XGBoost solo is the recommended submission. The on
 
 ### 8.1 Why XGBoost Outperforms CatBoost on This Dataset
 
-XGBoost's asymmetric trees are better suited to this feature set. The 297 selected features (from 759 engineered) contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
+XGBoost's asymmetric trees are better suited to this feature set. The 253 selected features (from 759 engineered) contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
 
 CatBoost's ordered boosting, while theoretically appealing, provides marginal benefit when 137K samples are available and the anomaly signal (sharp variance changes) is strong enough to be captured by standard gradient estimation.
 
@@ -368,11 +368,11 @@ The adversarial validation (AUC=1.0 for train vs Task 2) reveals a fundamental d
 
 | Model | Task 1 Anomaly Rate | Task 2 Anomaly Rate | Reduction |
 |-------|--------------------|--------------------|-----------|
-| XGBoost | 3.63% | 2.33% | −35.8% |
-| CatBoost | 3.55% | 1.73% | −51.3% |
+| XGBoost | 3.55% | 1.94% | −45.4% |
+| CatBoost | 3.49% | 1.49% | −57.3% |
 | LightGBM | 2.67% | 1.35% | −49.4% |
 
-XGBoost's smaller reduction (−35.8%) compared to CatBoost (−51.3%) suggests that its asymmetric trees, which learn more precise split thresholds, retain more detection sensitivity when the data distribution changes. CatBoost's symmetric structure, while producing smoother probabilities in-distribution, becomes overly conservative under shift — its heavier L2 regularization (`l2_leaf_reg=10.0`) may cause it to dismiss borderline anomaly patterns that fall just outside the training distribution's typical range.
+XGBoost's smaller reduction (−45.4%) compared to CatBoost (−57.3%) suggests that its asymmetric trees, which learn more precise split thresholds, retain more detection sensitivity when the data distribution changes. CatBoost's symmetric structure, while producing smoother probabilities in-distribution, becomes overly conservative under shift — its heavier L2 regularization (`l2_leaf_reg=10.0`) may cause it to dismiss borderline anomaly patterns that fall just outside the training distribution's typical range.
 
 **The double-edged sword of regularization.** CatBoost's optimization journey illustrates a key tension: heavy regularization (L2=10.0) was essential to reduce CV variance from 0.089 to 0.022, but this same regularization may limit its ability to generalize under distribution shift. The rolling standard deviation features that dominate both models are robust to mean shifts (they measure local variation) but are sensitive to variance scaling — a feature value of `f32_rs5=2.5` may indicate an anomaly in the training distribution but could be normal in a distribution with 1.5× variance. XGBoost's lighter regularization (L2=0.5) and exact split finding allow it to retain finer distinctions within the anomaly probability range, potentially preserving recall under shift at the cost of slightly higher false positive risk.
 
