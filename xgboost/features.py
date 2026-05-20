@@ -108,7 +108,6 @@ def engineer_features(
     features_for_rolling: Optional[List[str]] = None,
     features_for_lag: Optional[List[str]] = None,
     features_for_diff: Optional[List[str]] = None,
-    fill_method: str = "ffill",
     robust: bool = False,
     robust_windows: Optional[List[int]] = None,
     prank_windows: Optional[List[int]] = None,
@@ -162,7 +161,7 @@ def engineer_features(
     if features_for_diff is None:
         features_for_diff = feature_cols
 
-    result_parts = [df.copy()]
+    result_parts = [df]
 
     print(f"Engineering features on {len(df)} rows...")
 
@@ -217,9 +216,7 @@ def engineer_features(
     # Combine
     result = pd.concat(result_parts, axis=1)
 
-    # Fill NaN
-    result = result.ffill().bfill()
-    result = result.fillna(0)
+    result = result.ffill().bfill().fillna(0)
 
     print(f"  Total features after engineering: {result.shape[1]}")
     return result

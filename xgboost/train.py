@@ -98,19 +98,15 @@ def main():
     print("Robust Anomaly Detection - XGBoost Training")
     print("=" * 60)
 
-    # 1. Load data
     df = load_data()
 
-    # 2. Engineer all temporal features
     print("\n--- Feature Engineering ---")
     X_all = engineer_features(df.drop(columns=["y"]))
     y = df["y"].values
 
-    # 3. Feature selection (deterministic)
     feature_cols = select_features(X_all, y)
     X = X_all[feature_cols]
 
-    # 4. Temporal train/val split
     full_df = pd.concat([X, df[["y"]]], axis=1)
     train_df, val_df = temporal_anomaly_aware_split(full_df)
 
@@ -119,10 +115,7 @@ def main():
     X_val = val_df[feature_cols].values
     y_val = val_df["y"].values
 
-    # 5. Class weight
     scale_pos_weight = compute_scale_pos_weight(y)
-
-    # 6. Train XGBoost with early stopping on validation set
     print("\n--- Training XGBoost ---")
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
@@ -160,7 +153,7 @@ def main():
     best_iter = val_model.best_iteration
     print(f"  Best iteration: {best_iter}")
 
-    # 7. Retrain final model on ALL data
+    # Retrain final model on ALL data after early stopping determines best_iter
     print("\n" + "=" * 60)
     print("Retraining final model on ALL data...")
     print("=" * 60)
@@ -187,7 +180,7 @@ def main():
     joblib.dump(meta, os.path.join(MODEL_DIR, "metadata.pkl"))
     print(f"Metadata saved to {MODEL_DIR}/metadata.pkl ({len(feature_cols)} features)")
 
-    # 8. Generate predictions
+    # Generate predictions for both test sets
     print("\n" + "=" * 60)
     print("Generating Test Predictions")
     print("=" * 60)

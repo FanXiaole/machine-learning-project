@@ -38,9 +38,9 @@ An extensive search over window configurations revealed that **ultra-short windo
 | Original features | `f1`–`f33` | 33 |
 | **Total** | | **759** |
 
-Feature pruning via XGBoost gain-based importance reduces this to **253 features** (~33% of total) while retaining ~100% of the gain. The top features are dominated by rolling standard deviation, confirming that changes in local variance are the primary anomaly signal.
+Feature pruning via XGBoost gain-based importance reduces this to **297 features** (~39% of total) while retaining ~100% of the gain. The top features are dominated by rolling standard deviation, confirming that changes in local variance are the primary anomaly signal.
 
-**Reproducibility mechanism.** The 253 selected feature names are stored in `metadata.pkl` alongside the trained model. On subsequent runs, `train.py` loads this feature list from the existing metadata rather than re-running gain-based selection. This guarantees that the same 253 features are used for both training and inference. If no metadata exists (first-time training), a fresh gain-based selection is performed on the full 759 features.
+**Reproducibility mechanism.** The 297 selected feature names are stored in `metadata.pkl` alongside the trained model. On subsequent runs, `train.py` loads this feature list from the existing metadata rather than re-running gain-based selection. This guarantees that exactly the same features are used for both training and inference, regardless of potential variation in fresh gain-based selection results. If no metadata exists (first-time training), a fresh gain-based selection is performed on the full 759 features.
 
 ---
 
@@ -175,7 +175,7 @@ A robustness score is defined as:
 robustness_score = anomaly_norm − 0.5 × (adversary_norm / anomaly_norm)
 ```
 
-Features are ranked by this score and the top 250 (out of 253 gain-positive features from the adversarial experiment's specific XGBoost configuration) are retained. Note that the final production model uses 253 gain-selected features (Section 2); the 253 here reflects the consistent feature count across all fresh training runs.
+Features are ranked by this score and the top 250 (out of 253 gain-positive features from the adversarial experiment's specific XGBoost configuration) are retained. Note that the final production model uses 297 gain-selected features (Section 2).
 
 ### 5.4 Results
 
@@ -295,7 +295,7 @@ Ensemble provides no benefit. XGBoost solo is the recommended submission. The on
 
 ### 8.1 Why XGBoost Outperforms CatBoost on This Dataset
 
-XGBoost's asymmetric trees are better suited to this feature set. The 253 selected features (from 759 engineered) contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
+XGBoost's asymmetric trees are better suited to this feature set. The 297 selected features (from 759 engineered) contain many correlated rolling statistics (e.g., `f1_rm2` and `f1_rm3` differ only by window size). Asymmetric trees can route different samples to different features at each leaf, naturally handling redundancy. CatBoost's symmetric trees force all nodes at a level to use the same split, wasting capacity on correlated features.
 
 CatBoost's ordered boosting, while theoretically appealing, provides marginal benefit when 137K samples are available and the anomaly signal (sharp variance changes) is strong enough to be captured by standard gradient estimation.
 
